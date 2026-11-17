@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF 게시글 OCR</title>
+<style>
+:root{--bg:#f7f7f5;--card:#fff;--text:#1f1f1f;--sub:#6b6b6b;--line:#ddd;--accent:#2f6fed}
+@media (prefers-color-scheme:dark){:root{--bg:#171717;--card:#222;--text:#eee;--sub:#999;--line:#3a3a3a;--accent:#6b9bff}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;padding:24px 16px}
+main{max-width:760px;margin:0 auto}
+h1{font-size:1.5rem;margin:0 0 4px}
+p.sub{color:var(--sub);margin:0 0 20px}
+.drop{border:2px dashed var(--line);border-radius:14px;background:var(--card);padding:36px 16px;text-align:center;cursor:pointer}
+.drop.over{border-color:var(--accent)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:14px 0}
+select,button{font:inherit;padding:9px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text)}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+button:disabled{opacity:.5}
+label.chk{font-size:.9rem;color:var(--sub)}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:8px}
+.bar>div{height:100%;width:0;background:var(--accent);transition:width .2s}
+#status{color:var(--sub);font-size:.9rem}
+textarea{width:100%;min-height:260px;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;line-height:1.5}
+details{margin-top:16px}
+</style>
+</head>
+<body>
+<main>
+  <h1>PDF 게시글 OCR</h1>
+  <p class="sub">게시글 PDF에서 제목과 본문만 뽑아냅니다. 광고와 이미지는 제외하고, 파일은 서버로 전송되지 않습니다.</p>
+
+  <div class="drop" id="drop">PDF 파일을 끌어다 놓거나 클릭해서 선택<br><small id="fname" style="color:var(--sub)"></small></div>
+  <input type="file" id="file" accept="application/pdf" hidden>
+
+  <div class="row">
+    <select id="mode">
+      <option value="post">게시글 추출 (제목+본문)</option>
+      <option value="all">전체 텍스트 (모든 페이지)</option>
+    </select>
+    <select id="lang">
+      <option value="kor+eng">한국어 + 영어</option>
+      <option value="kor">한국어</option>
+      <option value="eng">영어</option>
+    </select>
+  </div>
+  <div class="row"><label class="chk"><input type="checkbox" id="useText" checked> PDF에 글자 정보가 있으면 OCR 없이 그대로 사용 (더 빠르고 정확)</label></div>
+  <div class="row">
+    <button class="primary" id="run" disabled>시작</button>
+    <button id="copy" disabled>복사</button>
+    <button id="dl" disabled>TXT 저장</button>
+  </div>
+
+  <div id="status">대기 중</div>
+  <div class="bar"><div id="prog"></div></div>
+
+  <h3>결과</h3>
+  <textarea id="out" placeholder="추출된 제목과 본문이 여기에 표시됩니다"></textarea>
+
+  <details>
+    <summary>인식된 전체 원문 보기 (추출이 이상할 때 확인용)</summary>
+    <textarea id="raw"></textarea>
+  </details>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const $ = id => document.getElementById(id);
+let pdfFile = null;
+
+/* ---------- 파일 선택 ---------- */
+function setFile(f){
+  if(!f || f.type !== "application/pdf"){ $("status").textContent = "PDF 파일만 가능합니다."; return; }
+  pdfFile = f; $("fname").textContent = f.name; $("run").disabled = false;
+  $("status").textContent = "준비 완료";
+}
+$("drop").onclick = () => $("file").click();
+$("file").onchange = e => setFile(e.target.files[0]);
+$("drop").ondragover = e => { e.preventDefault(); $("drop").classList.add("over"); };
+$("drop").ondragleave = () => $("drop").classList.remove("over");
+$("drop").ondrop = e => { e.preventDefault(); $("drop").classList.remove("over"); setFile(e.dataTransfer.files[0]); };
+
+/* ---------- 줄 단위 텍스트 얻기 ---------- */
+// 방법 1: PDF 내장 글자(텍스트 레이어)를 위치(y좌표) 기준으로 줄 묶기
+async function textLayerLines(page){
+  const tc = await page.getTextContent();
+  const items = tc.items.filter(i => i.str.trim()).map(i => ({s:i.str, x:i.transform[4], y:i.transform[5]}));
+  items.sort((a,b) => b.y - a.y || a.x - b.x);
+  const rows = []; let cur = null;
+  for(const it of items){
+    if(cur && Math.abs(cur.y - it.y) < 4) cur.items.push(it);
+    else { cur = {y: it.y, items: [it]}; rows.push(cur); }
+  }
+  return rows.map(r => r.items.sort((a,b) => a.x - b.x).map(i => i.s).join(" "));
+}
+
+// 방법 2: 페이지를 이미지로 그려서 OCR
+let worker = null;
+async function ocrLines(page, cur, total){
+  if(!worker){
+    worker = await Tesseract.createWorker($("lang").value, 1, {
+      logger: m => { if(m.status === "recognizing text") $("prog").style.width = (((cur-1) + m.progress) / total * 100) + "%"; }
+    });
+  }
+  const viewport = page.getViewport({scale: 2.5});
+  const canvas = document.createElement("canvas");
+  canvas.width = viewport.width; canvas.height = viewport.height;
+  await page.render({canvasContext: canvas.getContext("2d"), viewport}).promise;
+  const { data } = await worker.recognize(canvas);
+  return data.lines.map(l => l.text);
+}
+
+/* ---------- 게시글 구조 분석 (제목 / 본문 / 광고 제외) ---------- */
+const DATE_RE = /20\d{2}\s*[.\-]\s*\d{1,2}\s*[.\-]\s*\d{1,2}(\s*\d{1,2}:\d{2})?/;
+const END_RE  = /(펌|공유|스크랩|신고|목록보기|비추)/;   // 본문이 끝나는 지점의 버튼 글자
+
+function parsePost(rawLines){
+  const lines = rawLines.map(s => s.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const di = lines.findIndex(l => DATE_RE.test(l));       // 작성자 + 날짜 줄
+  if(di < 1) return null;
+
+  const title = lines[di-1].replace(/[\s|]+$/, "");
+  const dm = lines[di].match(DATE_RE);
+  const date = dm ? dm[0] : "";
+  const author = lines[di].replace(DATE_RE, "").replace(/[|\s]+$/g, "").replace(/^[|\s]+/g, "");
+
+  // 조회수 / 추천 / 댓글 줄
+  let mi = -1;
+  for(let i = di+1; i < Math.min(lines.length, di+6); i++){ if(/조회수/.test(lines[i])){ mi = i; break; } }
+  const meta = mi >= 0 ? lines[mi] : "";
+  const g = re => (meta.match(re) || [])[1] || "";
+  let start = (mi >= 0 ? mi : di) + 1;
+
+  // 본문 앞에 낀 광고 건너뛰기: "더 알아보기" 버튼이 나오면 그 다음부터 본문
+  for(let i = start; i < Math.min(lines.length, start + 12); i++){
+    if(/더\s*알아보기/.test(lines[i])){ start = i + 1; break; }
+  }
+  // 본문 끝: 개념/비추/펌/공유/스크랩/신고/목록보기 버튼 줄
+  const body = [];
+  for(let i = start; i < lines.length; i++){
+    if(END_RE.test(lines[i]) && lines[i].length < 30) break;
+    body.push(lines[i]);
+  }
+  return { title, author, date, views: g(/조회수\s*(\d+)/), rec: g(/추천\s*(\d+)/), cmt: g(/댓글\s*\[?(\d+)/), body: body.join("\n") };
+}
+
+function formatPost(p){
+  return `[제목]\n${p.title}\n\n[작성자] ${p.author}   [작성일] ${p.date}\n[조회수] ${p.views}   [추천] ${p.rec}   [댓글] ${p.cmt}\n\n[본문]\n${p.body}`;
+}
+
+/* ---------- 실행 ---------- */
+$("run").onclick = async () => {
+  $("run").disabled = true; $("out").value = ""; $("raw").value = ""; $("prog").style.width = "0";
+  try {
+    const pdf = await pdfjsLib.getDocument({data: await pdfFile.arrayBuffer()}).promise;
+    const mode = $("mode").value;
+    const total = mode === "post" ? 1 : pdf.numPages;      // 게시글 모드는 1페이지만 사용
+    let rawAll = "", firstLines = [], used = "";
+
+    for(let cur = 1; cur <= total; cur++){
+      $("status").textContent = `${cur} / ${total} 페이지 처리 중...`;
+      const page = await pdf.getPage(cur);
+      let lines = $("useText").checked ? await textLayerLines(page) : [];
+      if(lines.join("").length > 20){ used = "PDF 내장 글자"; }
+      else { used = "OCR"; lines = await ocrLines(page, cur, total); }
+      if(cur === 1) firstLines = lines;
+      rawAll += `--- ${cur} 페이지 ---\n${lines.join("\n")}\n\n`;
+      $("prog").style.width = (cur / total * 100) + "%";
+    }
+    $("raw").value = rawAll;
+
+    if(mode === "post"){
+      const post = parsePost(firstLines);
+      if(post){ $("out").value = formatPost(post); $("status").textContent = `완료! (${used} 사용)`; }
+      else { $("out").value = rawAll; $("status").textContent = "제목/날짜를 찾지 못해 전체 텍스트를 표시했습니다."; }
+    } else {
+      $("out").value = rawAll; $("status").textContent = `완료! (${used} 사용)`;
+    }
+    $("copy").disabled = $("dl").disabled = false;
+  } catch(err){
+    console.error(err);
+    $("status").textContent = "오류: " + err.message;
+  } finally {
+    if(worker){ await worker.terminate(); worker = null; }
+    $("run").disabled = false;
+  }
+};
+
+$("copy").onclick = async () => { await navigator.clipboard.writeText($("out").value); $("status").textContent = "복사했습니다."; };
+$("dl").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([$("out").value], {type:"text/plain;charset=utf-8"}));
+  a.download = (pdfFile.name.replace(/\.pdf$/i,"") || "ocr") + ".txt";
+  a.click();
+};
+</script>
+</body>
+</html>
