@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>고발PDF 분석 v20</title>
+<style>
+:root{color-scheme:dark;--bg:#000;--card:#121212;--text:#ececec;--sub:#a3a3a3;--line:#2e2e2e;--accent:#ffd400;--accent2:#ffd400}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Noto Sans KR",sans-serif;padding:24px 16px}
+main{max-width:1180px;margin:0 auto}
+h1{font-size:1.5rem;margin:0 0 14px;background:#ffd400;color:#111;padding:16px 22px;border-radius:12px}
+p.sub{color:var(--sub);margin:0 0 20px}
+.drop{border:2px dashed var(--line);border-radius:14px;background:var(--card);padding:30px 16px;text-align:center;cursor:pointer}
+.drop.over{border-color:var(--accent2)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:12px 0}
+select,button,.in{font:inherit;padding:9px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text)}
+.in{flex:1;min-width:180px}
+button.primary{background:var(--accent);color:#111;border-color:var(--accent);font-weight:600}
+button:disabled{opacity:.5}
+.chk,.note{font-size:.85rem;color:var(--sub);line-height:1.5}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:8px}
+.bar>div{height:100%;width:0;background:var(--accent2);transition:width .2s}
+#status{color:var(--sub);font-size:.9rem}
+textarea{width:100%;min-height:240px;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit;line-height:1.5}
+details{margin-top:14px}
+table{border-collapse:collapse;width:100%;font-size:.86rem;background:var(--card)}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+th{background:var(--bg);white-space:nowrap}
+mark{background:#ffe08a;color:#222;border-radius:3px;padding:0 2px}
+.t1{color:#ff6b6b;font-weight:600}.t2{color:#ffb347;font-weight:600}.t3{color:#d29bff;font-weight:600}
+#summary{margin:8px 0;font-weight:600}
+
+html{-webkit-text-size-adjust:100%}
+td{word-break:break-word}
+input,select,textarea{font-size:16px}
+@media (max-width:640px){
+  body{padding:14px 10px}
+  h1{font-size:1.3rem}
+  .drop{padding:26px 10px}
+  .row{gap:8px}
+  .row button,.row select{flex:1 1 calc(50% - 8px);padding:12px 10px}
+  .row .in{flex:1 1 100%;max-width:none!important}
+  button.primary{flex:1 1 100%}
+  table{font-size:.8rem}
+  th,td{padding:5px 6px}
+  textarea{min-height:200px}
+}
+.cols{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:18px;align-items:start}
+@media (max-width:860px){.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+  <h1>고발PDF 분석 <small style="font-size:.55em;opacity:.7;font-weight:400">v20</small></h1>
+  <p class="sub">여러 PDF에서 제목·본문을 뽑고 법률 검토용 단서를 정리합니다. 인식은 브라우저 안에서만 이뤄집니다.</p>
+
+  <p id="inappWarn" class="note" style="display:none;color:#ffb347;margin:-8px 0 14px">⚠️ 카카오톡·네이버 같은 앱 안의 브라우저로 열었습니다. 이런 화면은 공용 비밀번호와 사전이 저장되지 않아 다른 기기와 사전이 달라질 수 있어요. 오른쪽 아래 ⋯(또는 공유 버튼) → <b>Safari(또는 Chrome)로 열기</b>를 눌러 쓰세요.</p>
+  <div class="drop" id="drop">PDF·이미지 파일을 끌어다 놓거나 클릭해서 선택 (여러 개 가능)<br><small id="fname" style="color:var(--sub)"></small></div>
+  <input type="file" id="file" accept="application/pdf,image/*" multiple hidden>
+  <input type="file" id="dir" webkitdirectory hidden>
+  <div class="row">
+    <button id="pickDir">폴더 통째로 선택</button>
+    <input type="date" id="drvDate" class="in" style="max-width:160px;flex:0 1 160px">
+    <button id="drvLoad">드라이브 목록 보기</button>
+  </div>
+  <p class="note">드라이브 불러오기: 수신일 폴더 날짜를 고르고 <b>목록 보기</b>를 누르면 PDF 목록이 나옵니다. 그중 <b>최대 10개</b>를 직접 골라 불러옵니다. 날짜를 비우면 최근 폴더부터 최대 60개를 보여줍니다. (아래 "구글 스프레드시트로 보내기"에 공용 비밀번호 입력 필요)</p>
+  <div id="drvList" style="display:none;border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0;background:var(--card)">
+    <div class="row" style="margin:0 0 8px">
+      <span id="pickCount" class="note">선택 0 / 10</span>
+      <button id="pickFirst" style="padding:5px 10px;font-size:.85rem">앞에서 10개 선택</button>
+      <button id="pickNone" style="padding:5px 10px;font-size:.85rem">선택 해제</button>
+      <button id="drvGo" class="primary" disabled>선택한 파일 불러오기</button>
+    </div>
+    <div id="drvItems" style="max-height:260px;overflow-y:auto"></div>
+  </div>
+
+  <div class="row">
+    <select id="mode"><option value="post">제목·시간·본문·댓글만 추출</option><option value="raw">전체 텍스트 (원본 그대로, 확인용)</option></select>
+    <select id="lang"><option value="kor+eng">한국어 + 영어</option><option value="kor">한국어</option><option value="eng">영어</option></select>
+    <label class="chk"><input type="checkbox" id="useText" checked autocomplete="off"> PDF 내장 글자 우선 사용 (글자가 없거나 깨졌을 때만 OCR · 오타 없음)</label>
+    <label class="chk"><input type="checkbox" id="skipImg" checked autocomplete="off"> 사진·광고·버튼은 OCR 제외</label>
+    <label class="chk"><input type="checkbox" id="withCmt" checked autocomplete="off"> 댓글 포함 (2페이지까지 확인)</label>
+  </div>
+  <div class="row">
+    <button class="primary" id="run" disabled>시작</button>
+    <button id="copy" disabled>복사</button>
+    <button id="dl" disabled>TXT 저장</button>
+  </div>
+  <div id="status">대기 중</div>
+  <div class="bar"><div id="prog"></div></div>
+
+  <div class="cols">
+    <div>
+      <h3>결과</h3>
+      <textarea id="out" style="min-height:520px" placeholder="추출된 제목과 본문이 파일별로 표시됩니다"></textarea>
+    </div>
+    <div>
+      <h3>대표화면 <small style="color:var(--sub);font-weight:400">(클릭하면 해당 파일 결과로 이동)</small></h3>
+      <div class="row" style="margin-top:0">
+        <label class="chk">UI 유사도 기준 <input type="number" id="uiTh" class="in" value="90" min="50" max="100" style="flex:0 0 72px;min-width:0;padding:6px 8px"> %</label>
+        <label class="chk"><input type="checkbox" id="showAll" autocomplete="off"> 다른 형식도 표시</label>
+        <span class="note" id="galNote"></span>
+      </div>
+      <div id="gallery" style="display:flex;flex-direction:column;gap:12px;max-height:560px;overflow-y:auto"></div>
+    </div>
+  </div>
+
+  <h3>법률 검토용 분석 <small style="color:var(--sub);font-weight:400">(참고용)</small></h3>
+  <div class="row">
+    <input class="in" id="targets" placeholder="대상 인물 이름·별칭 (쉼표로 구분, 선택)">
+    <select id="sort"><option value="pri">정렬: 우선순위순</option><option value="pos">정렬: 원문 순서</option></select>
+    <button id="analyze" disabled>분석 실행</button>
+  </div>
+  <div id="summary"></div>
+  <div id="tblwrap" style="overflow-x:auto"></div>
+  <div class="row">
+    <button id="rep" disabled>상담용 리포트 저장 (TXT)</button>
+    <button id="csv" disabled>분석표 저장 (CSV)</button>
+  </div>
+
+  <details open>
+    <summary>구글 스프레드시트로 보내기 (드라이브 파일 링크 자동 매칭)</summary>
+    <div class="row">
+      <input class="in" id="gsUrl" placeholder="Apps Script 웹앱 주소 (https://script.google.com/macros/s/.../exec)">
+      <input class="in" id="gsToken" type="password" placeholder="공용 비밀번호" style="max-width:190px;flex:0 1 190px">
+    </div>
+    <div class="row">
+      <input class="in" id="gsWho" placeholder="내 이름 (선택, 시트에 전송자로 기록)" style="max-width:250px;flex:0 1 250px">
+      <button id="gsSend" disabled>시트로 보내기</button>
+      <button id="gsLogout">비밀번호 지우기</button>
+    </div>
+    <p class="note">"분석표"(단서 1건 = 1줄)와 "원문"(파일 1개 = 1줄) 시트에 쌓이며, 각 줄에 드라이브 파일 링크와 수신일 폴더가 함께 들어갑니다. 공용 비밀번호는 한 번 입력하면 이 브라우저에 자동 저장됩니다. 공용 PC에서는 사용 후 "비밀번호 지우기"를 누르세요.</p>
+  </details>
+  <details open>
+    <summary>속어·문장 등록 (서버 공용 사전에 자동 합쳐짐)</summary>
+    <p class="note">여기서 등록하면 서버의 공용 사전에 자동으로 합쳐지고, 다른 사람 화면에도 접속할 때(또는 시작을 누를 때) 바로 적용됩니다. 띄어쓰기·마침표는 무시하고 찾으며, OCR이 다르게 읽는 표기도 함께 등록하세요. 문장·어구는 "등록 방식"을 바꾸고 한 줄에 하나씩 넣으세요 (6자 이상은 오타 약 15%까지 허용). <b>조합 등록</b>: "단어1+단어2"처럼 +로 이으면 같은 줄에 둘 다 있을 때만 표시합니다 (순서·어미 무관, 3개 이상도 가능).</p>
+    <div class="row">
+      <textarea class="in" id="newWords" style="min-height:70px" placeholder=""></textarea>
+      <select id="newMode"><option value="words">단어 (쉼표로 구분)</option><option value="phrase">문장·어구 (한 줄에 하나)</option></select>
+      <select id="newKind"><option value="insult">모욕 표현</option><option value="defam">명예훼손 단서</option></select>
+      <input class="in" id="newGroup" placeholder="분류명 (기본: 사용자 등록)" style="max-width:190px;flex:0 1 190px">
+      <button id="addWords" class="primary">서버 사전에 추가</button>
+    </div>
+    <div class="row" style="margin:4px 0"><span id="dictMsg" class="note"></span><button id="syncNow" style="padding:4px 10px;font-size:.8rem">↻ 지금 동기화</button></div>
+    <div id="refInfo" class="note"></div>
+  </details>
+  <p class="note">※ 사전의 단어·문형으로 <b>단서를 표시</b>할 뿐 모욕죄·명예훼손죄의 성립 여부를 판단하지 않습니다. 사실 여부, 공연성, 특정성, 비방 목적, 위법성 조각(형법 제310조) 등은 변호사가 확인해야 합니다. OCR 오류는 결과 칸을 고친 뒤 "분석 실행"을 다시 누르세요.</p>
+  <details>
+    <summary>현재 탐지 사전 보기 (읽기 전용) <span id="dictState" class="note"></span></summary>
+    <p class="note">모욕 표현 사전</p><textarea id="dInsult" readonly style="min-height:40px;resize:none;overflow:hidden"></textarea>
+    <p class="note">명예훼손 단서 사전</p><textarea id="dDefam" readonly style="min-height:40px;resize:none;overflow:hidden"></textarea>
+  </details>
+  <details>
+    <summary>모욕죄 · 명예훼손 구분 요약</summary>
+    <p class="note">
+      · 모욕(형법 제311조): 사실 적시 없이 공연히 경멸적 표현 / 1년 이하 징역·금고 또는 200만원 이하 벌금 / 고소 필요<br>
+      · 사실적시 명예훼손(형법 제307조 제1항): 2년 이하 징역·금고 또는 500만원 이하 벌금<br>
+      · 허위사실 명예훼손(형법 제307조 제2항): 5년 이하 징역, 10년 이하 자격정지 또는 1천만원 이하 벌금<br>
+      · 정보통신망 명예훼손(정보통신망법 제70조): 비방 목적 필요, 사실 3년·거짓 7년 이하 징역 등 (모욕은 포함하지 않음)<br>
+      · 공통 요건: 공연성(전파 가능성), 대상의 특정성
+    </p>
+  </details>
+  <details>
+    <summary>인식된 전체 원문 보기</summary>
+    <textarea id="raw"></textarea>
+  </details>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const CMAP = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/";
+const FONTS = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/";
+const $ = id => document.getElementById(id);
+// ★ 관리자가 한 번만 설정: 구글 앱스스크립트 웹앱 주소(…/exec)를 따옴표 안에 붙여넣으세요.
+const GS_URL = "여기에-웹앱-주소를-붙여넣으세요";
+let queue = [], RESULTS = [], rows = [], worker = null, PB = 0, PS = 1, FI = 0;
+
+/* ---------- 파일 선택 (여러 개 / 폴더 / 드라이브) ---------- */
+function setQueue(items){
+  queue = items;
+  $("fname").textContent = items.length ? `${items.length}개 파일 선택됨` : "";
+  $("run").disabled = !items.length;
+  $("status").textContent = items.length ? "준비 완료" : "PDF 또는 이미지 파일이 없습니다.";
+}
+const okType = f => f.type === "application/pdf" || f.type.startsWith("image/") || /\.pdf$/i.test(f.name);
+function fromFiles(list){
+  return [...list].filter(okType)
+    .sort((a,b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name))
+    .map(f => { const p = (f.webkitRelativePath || "").split("/");
+      return {file: f, name: f.name, rel: p.length > 1 ? p[p.length-2] : "", id: ""}; });
+}
+
+/* 모바일에서는 폴더 선택이 지원되지 않으므로 숨김 */
+if(!("webkitdirectory" in document.createElement("input")) || /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)) $("pickDir").style.display = "none";
+$("drop").onclick = () => $("file").click();
+$("pickDir").onclick = () => $("dir").click();
+$("file").onchange = e => setQueue(fromFiles(e.target.files));
+$("dir").onchange = e => setQueue(fromFiles(e.target.files));
+$("drop").ondragover = e => { e.preventDefault(); $("drop").classList.add("over"); };
+$("drop").ondragleave = () => $("drop").classList.remove("over");
+$("drop").ondrop = e => { e.preventDefault(); $("drop").classList.remove("over"); setQueue(fromFiles(e.dataTransfer.files)); };
+
+/* ---------- 구글 앱스스크립트 호출 ---------- */
+async function gsCall(body){
+  const url = $("gsUrl").value.trim(), token = $("gsToken").value;
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url) || !token) throw new Error("아래 '구글 스프레드시트로 보내기'에 공용 비밀번호를 먼저 입력하세요.");
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"}, body: JSON.stringify({token, who: $("gsWho").value.trim(), ...body})});
+  const j = await r.json();
+  if(j.error) throw new Error(j.error);
+  return j;
+}
+const MAX_PICK = 10;                      // 한 번에 불러올 수 있는 최대 파일 수
+let drvFiles = [];
+$("drvLoad").onclick = async () => {
+  $("drvLoad").disabled = true;
+  try {
+    $("status").textContent = "드라이브 파일 목록 확인 중...";
+    const {files} = await gsCall({action: "list", date: $("drvDate").value});
+    drvFiles = files;
+    if(!files.length){ $("drvList").style.display = "none"; $("status").textContent = "해당 조건의 PDF가 없습니다."; return; }
+    const box = $("drvItems"); box.innerHTML = "";
+    files.forEach((f, i) => {
+      const lab = document.createElement("label"); lab.className = "chk"; lab.style.cssText = "display:block;padding:5px 2px";
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.value = i; cb.onchange = updatePick;
+      lab.append(cb, " " + f.folder + " / " + f.name); box.appendChild(lab);
+    });
+    $("drvList").style.display = "block"; updatePick();
+    $("status").textContent = `목록 ${files.length}개 — 불러올 파일을 최대 ${MAX_PICK}개까지 고르세요.`;
+  } catch(e){
+    $("status").textContent = "목록 불러오기 실패: " + e.message;
+  } finally { $("drvLoad").disabled = false; }
+};
+const pickBoxes = () => [...$("drvItems").querySelectorAll("input")];
+function updatePick(){
+  const cbs = pickBoxes(), n = cbs.filter(c => c.checked).length;
+  cbs.forEach(c => { c.disabled = !c.checked && n >= MAX_PICK; });           // 10개가 차면 나머지는 선택 불가
+  $("pickCount").textContent = `선택 ${n} / ${MAX_PICK}`; $("drvGo").disabled = n === 0;
+}
+$("pickFirst").onclick = () => { pickBoxes().forEach((c, i) => { c.checked = i < MAX_PICK; }); updatePick(); };
+$("pickNone").onclick = () => { pickBoxes().forEach(c => { c.checked = false; }); updatePick(); };
+$("drvGo").onclick = async () => {
+  const sel = pickBoxes().filter(c => c.checked).map(c => drvFiles[+c.value]);
+  if(!sel.length) return;
+  $("drvGo").disabled = true;
+  try {
+    const items = [];
+    for(let i = 0; i < sel.length; i++){
+      $("status").textContent = `드라이브에서 내려받는 중... ${i+1}/${sel.length}`;
+      const f = sel[i], j = await gsCall({action: "file", id: f.id});
+      const bin = atob(j.b64), u8 = new Uint8Array(bin.length);
+      for(let k = 0; k < bin.length; k++) u8[k] = bin.charCodeAt(k);
+      items.push({file: new File([u8], f.name, {type: "application/pdf"}), name: f.name, rel: f.folder, id: f.id});
+    }
+    setQueue(items);
+  } catch(e){
+    $("status").textContent = "불러오기 실패: " + e.message + " (계속 안 되면 '폴더 통째로 선택'을 쓰세요)";
+  } finally { updatePick(); }
+};
+
+/* ---------- 줄 단위 텍스트 얻기 ---------- */
+const CTRL = /[\u0000-\u0008\u000b-\u001f\u00a0\u200b]/g;
+async function textLayerLines(page, vp, wipes){
+  const tc = await page.getTextContent();
+  const items = tc.items.map(i => ({s: i.str.replace(CTRL, " "), x: i.transform[4], y: i.transform[5], w: i.width || 0, h: i.height || 0}))
+    .filter(i => i.s.trim())
+    .filter(i => {
+      if(!vp || !wipes || !wipes.length) return true;
+      const [vx, vy] = vp.convertToViewportPoint(i.x, i.y);
+      return !wipes.some(r => vx >= r.x && vx <= r.x + r.w && vy >= r.y && vy <= r.y + r.h);   // 광고 카드 안의 글자 제외
+    });
+  items.sort((a,b) => b.y - a.y || a.x - b.x);
+  const rs = []; let cur = null;
+  for(const it of items){
+    if(cur && Math.abs(cur.y - it.y) < 4) cur.items.push(it);
+    else { cur = {y: it.y, items: [it]}; rs.push(cur); }
+  }
+  return rs.map(r => {
+    let out = "", end = null;
+    r.items.sort((a,b) => a.x - b.x).forEach(it => { if(end !== null && it.x - end > Math.max(2, it.h * 0.25)) out += " "; out += it.s; end = it.x + it.w; });
+    return out.replace(/\s+/g, " ").trim();
+  });
+}
+async function ocrCanvas(canvas, cur, total){
+  if(!worker){
+    worker = await Tesseract.createWorker($("lang").value, 1, {
+      logger: m => { if(m.status === "recognizing text") $("prog").style.width = (PB + PS * ((cur-1) + m.progress) / total * 100) + "%"; }
+    });
+  }
+  const { data } = await worker.recognize(canvas);
+  return data.lines.map(l => l.text);
+}
+async function renderPage(page){
+  const base = page.getViewport({scale: 1});
+  const vp = page.getViewport({scale: Math.min(2.5, 3200 / Math.max(base.width, base.height))});
+  const canvas = document.createElement("canvas");
+  canvas.width = vp.width; canvas.height = vp.height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({canvasContext: ctx, viewport: vp}).promise;
+  return {canvas, vp};
+}
+// PDF 안에 그려진 사진(이미지)의 위치를 찾는다
+async function imageRects(page, vp){
+  const ops = await page.getOperatorList(), O = pdfjsLib.OPS;
+  const mul = (m, n) => [m[0]*n[0]+m[2]*n[1], m[1]*n[0]+m[3]*n[1], m[0]*n[2]+m[2]*n[3], m[1]*n[2]+m[3]*n[3], m[0]*n[4]+m[2]*n[5]+m[4], m[1]*n[4]+m[3]*n[5]+m[5]];
+  const IMG = new Set([O.paintImageXObject, O.paintInlineImageXObject, O.paintImageMaskXObject, O.paintImageXObjectRepeat, O.paintJpegXObject].filter(v => v !== undefined));
+  let ctm = [1,0,0,1,0,0]; const st = [], rects = [];
+  ops.fnArray.forEach((fn, i) => {
+    const a = ops.argsArray[i];
+    if(fn === O.save) st.push(ctm);
+    else if(fn === O.restore) ctm = st.pop() || [1,0,0,1,0,0];
+    else if(fn === O.transform) ctm = mul(ctm, a);
+    else if(fn === O.paintFormXObjectBegin){ st.push(ctm); if(a && a[0]) ctm = mul(ctm, a[0]); }
+    else if(fn === O.paintFormXObjectEnd) ctm = st.pop() || [1,0,0,1,0,0];
+    else if(IMG.has(fn)){
+      const m = mul(vp.transform, ctm);
+      const xs = [0,1,0,1].map((u, k) => m[0]*u + m[2]*[0,0,1,1][k] + m[4]);
+      const ys = [0,1,0,1].map((u, k) => m[1]*u + m[3]*[0,0,1,1][k] + m[5]);
+      const x = Math.max(0, Math.min(...xs)), y = Math.max(0, Math.min(...ys));
+      const w = Math.min(vp.width, Math.max(...xs)) - x, h = Math.min(vp.height, Math.max(...ys)) - y;
+      if(w >= 80 && h >= 80) rects.push({x, y, w, h});
+    }
+  });
+  return rects;
+}
+// 사진 영역을 하얗게 지워 OCR이 읽지 않게 함 (페이지 전체가 스캔 이미지면 그대로 둠)
+function blank(canvas, rects){
+  const ctx = canvas.getContext("2d"), area = canvas.width * canvas.height;
+  ctx.fillStyle = "#fff";
+  rects.forEach(r => { if(r.w * r.h < area * 0.85) ctx.fillRect(r.x - 1, r.y - 1, r.w + 2, r.h + 2); });
+}
+async function imageToCanvas(file){
+  const img = await createImageBitmap(file), sc = img.width < 1600 ? 1600 / img.width : 1;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * sc); canvas.height = Math.round(img.height * sc);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+/* ---------- 화면 정리: 광고 카드·사진·버튼·색이 있는 영역을 지움 ---------- */
+function uiSig(canvas){
+  const c = document.createElement("canvas"); c.width = 24; c.height = 30;
+  const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, 24, 30);
+  x.imageSmoothingQuality = "high"; x.drawImage(canvas, 0, 0, 24, 30);
+  return x.getImageData(0, 0, 24, 30).data;
+}
+const uiSim = (a, b) => { let s = 0; for(let i = 0; i < a.length; i += 4) s += Math.abs(a[i]-b[i]) + Math.abs(a[i+1]-b[i+1]) + Math.abs(a[i+2]-b[i+2]); return 1 - s / (a.length / 4 * 3 * 255); };
+function makeThumb(src){
+  const c = document.createElement("canvas"); c.width = 520; c.height = Math.max(1, Math.round(src.height * 520 / src.width));
+  c.getContext("2d").drawImage(src, 0, 0, c.width, c.height); return c;
+}
+// 배경이 어두운 화면(검은 바탕 + 흰 글자)은 색을 뒤집어서 일반 화면처럼 처리
+function normalizeDark(canvas){
+  const W = canvas.width, H = canvas.height, ctx = canvas.getContext("2d");
+  const d = ctx.getImageData(0, 0, W, H).data; let sum = 0, n = 0;
+  for(let i = 0; i < d.length; i += 148){ sum += d[i] * .299 + d[i+1] * .587 + d[i+2] * .114; n++; }
+  if(n && sum / n < 110){
+    ctx.globalCompositeOperation = "difference"; ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "source-over"; return true;
+  }
+  return false;
+}
+function cleanCanvas(canvas, rects){
+  const W = canvas.width, H = canvas.height, ctx = canvas.getContext("2d"), B = 24;
+  blank(canvas, rects);                                  // 1) PDF 안의 사진 영역을 먼저 지움
+  const sig = uiSig(canvas);                             // 대표화면 비교용 (사진만 지운 상태)
+  const d = ctx.getImageData(0, 0, W, H).data, bw = Math.ceil(W / B), bh = Math.ceil(H / B), mark = new Uint8Array(bw * bh);
+  for(let by = 0; by < bh; by++) for(let bx = 0; bx < bw; bx++){
+    let n = 0, nw = 0, sat = 0;
+    for(let y = by * B; y < Math.min(H, (by + 1) * B); y += 2) for(let x = bx * B; x < Math.min(W, (bx + 1) * B); x += 2){
+      const i = (y * W + x) * 4, mx = Math.max(d[i], d[i+1], d[i+2]), mn = Math.min(d[i], d[i+1], d[i+2]);
+      n++; if(mx < 235) nw++; if(mx - mn > 40) sat++;
+    }
+    if(n && (nw / n > 0.7 || sat / n > 0.12)) mark[by * bw + bx] = 1;     // 색이 있거나 면이 큰 곳 = 사진·배너·버튼
+  }
+  const wipes = [];
+  ctx.fillStyle = "#fff";
+  rects.filter(r => r.w >= W * 0.5 && r.w * r.h < W * H * 0.85).forEach(r => {   // 2) 광고 카드: 사진 아래 문구 + 오른쪽 버튼까지 통째로
+    const by0 = Math.ceil((r.y + r.h) / B), by1 = Math.min(bh, by0 + Math.ceil(H * 0.2 / B));
+    const bx0 = Math.floor(W * 0.65 / B), bx1 = Math.min(bw, Math.ceil(W * 0.97 / B));
+    let run = 0, end = -1;
+    for(let by = by0; by < by1; by++){
+      let has = false;
+      for(let bx = bx0; bx < bx1; bx++) if(mark[by * bw + bx]){ has = true; break; }
+      if(has){ run++; end = by; } else if(run >= 2) break; else run = 0;
+    }
+    if(run >= 2){ const hh = (end + 1) * B - r.y + 4; ctx.fillRect(0, r.y, W, hh); wipes.push({x: 0, y: r.y, w: W, h: hh}); }
+  });
+  for(let k = 0; k < mark.length; k++) if(mark[k]) ctx.fillRect((k % bw) * B, Math.floor(k / bw) * B, B, B);   // 3) 색·면 큰 영역
+  return {sig, wipes};
+}
+function jumpTo(k){
+  const ta = $("out"), i = ta.value.indexOf(`===== [${k+1}]`); if(i < 0) return;
+  const line = ta.value.slice(0, i).split("\n").length - 1, lh = parseFloat(getComputedStyle(ta).lineHeight) || 22;
+  ta.scrollTop = Math.max(0, line * lh - 8); ta.setSelectionRange(i, i);
+}
+function renderGallery(){
+  const g = $("gallery"); g.innerHTML = "";
+  const base = RESULTS.find(r => r.sig); if(!base){ $("galNote").textContent = ""; return; }
+  const th = (+$("uiTh").value || 90) / 100; let hidden = 0, shown = 0;
+  RESULTS.forEach((r, k) => {
+    if(!r.thumb || !r.sig) return;
+    const sm = r === base ? 1 : uiSim(base.sig, r.sig), ok = sm >= th;
+    if(!ok && !$("showAll").checked){ hidden++; return; }
+    shown++;
+    const fig = document.createElement("figure"); fig.style.cssText = "margin:0;cursor:pointer";
+    r.thumb.style.cssText = "width:100%;height:auto;display:block;border-radius:6px;border:2px solid " + (ok ? "var(--line)" : "#ff6b6b");
+    const cap = document.createElement("figcaption"); cap.className = "note";
+    cap.textContent = `[${k+1}] ${r.name} · ${Math.round(sm * 100)}%${ok ? "" : " (다른 형식)"}`;
+    fig.append(r.thumb, cap); fig.onclick = () => jumpTo(k); g.appendChild(fig);
+  });
+  $("galNote").textContent = `대표화면 ${shown}개 표시${hidden ? ` · 다른 형식 ${hidden}개 숨김` : ""}`;
+}
+$("showAll").onchange = renderGallery; $("uiTh").onchange = renderGallery;
+
+/* ---------- 사진 대조 (dHash 특징값) ---------- */
+const FLAT = "0".repeat(64);
+const toHex = bits => bits.match(/.{4}/g).map(b => parseInt(b, 2).toString(16)).join("");
+const toBits = hex => [...hex].map(c => parseInt(c, 16).toString(2).padStart(4, "0")).join("");
+function dhash(src, sx, sy, sw, sh){
+  const c = document.createElement("canvas"); c.width = 17; c.height = 16;
+  const x = c.getContext("2d"); x.drawImage(src, sx, sy, sw, sh, 0, 0, 17, 16);
+  const d = x.getImageData(0, 0, 17, 16).data, g = i => d[i*4]*.299 + d[i*4+1]*.587 + d[i*4+2]*.114;
+  let bits = "";
+  for(let r = 0; r < 16; r++) for(let k = 0; k < 16; k++) bits += g(r*17+k) > g(r*17+k+1) ? "1" : "0";
+  return toHex(bits);
+}
+function sim(h1, h2){ const a = toBits(h1), b = toBits(h2); let d = 0; for(let i = 0; i < 256; i++) if(a[i] !== b[i]) d++; return 1 - d / 256; }
+let refs = [];   // {name, src, h}
+const useImgMatch = () => refs.length > 0;
+function matchImages(canvas, rects, cur){
+  const th = 0.9, out = [];   // 일치 기준 90%
+  rects.forEach((r, n) => {
+    const crops = [[r.x, r.y, r.w, r.h], [r.x, r.y, r.w/2, r.h], [r.x + r.w/2, r.y, r.w/2, r.h], [r.x, r.y, r.w, r.h/2], [r.x, r.y + r.h/2, r.w, r.h/2]];
+    const hs = crops.map(c => dhash(canvas, ...c)).filter(h => h !== FLAT);
+    refs.forEach(ref => {
+      const best = Math.max(0, ...hs.map(h => sim(h, ref.h)));
+      if(best >= th) out.push({page: cur, ref: ref.name, sim: best, n: n + 1});
+    });
+  });
+  return out;
+}
+
+/* ---------- 게시글 구조 분석 ---------- */
+const DATE_RE = /20\d{2}\s*[.\-]\s*\d{1,2}\s*[.\-]\s*\d{1,2}(\s*\d{1,2}:\d{2})?/;
+const END_RE = /(펌|공유|스크랩|신고|목록보기|비추|작성글\s*검색)/;
+const AD_CTA = /(더\s*알아보기|문의하기|자세히\s*보기|바로\s*가기|신청하기|구매하기|지금\s*확인|예약하기|상담\s*신청|다운로드|설치하기|참여하기|가입하기|알아보기|보러\s*가기|확인하기)\s*$/;
+const CMT_END = /(댓글을\s*입력|파워링크|보이스\s*리플|글자콘)/;
+const CMT_HEAD = /^댓글\s*(\[\s*\d+\s*\]|\d+)(\s|$)/;
+const OK_CH = /[가-힣ㄱ-ㅎㅏ-ㅣA-Za-z0-9]/;
+function parsePost(rawLines){
+  const lines = rawLines.map(s => s.replace(CTRL, " ").replace(/\s+/g, " ").trim()).filter(l => l && OK_CH.test(l));
+  const di = lines.findIndex(l => DATE_RE.test(l) && !/https?:/.test(l));      // 작성자 + 게시시간 줄
+  if(di < 1) return null;
+  const title = lines[di-1].replace(/[\s|]+$/, "");
+  const time = (lines[di].match(DATE_RE) || [""])[0];
+  const author = lines[di].replace(DATE_RE, "").replace(/^[|\s]+|[|\s]+$/g, "");      // 예: ㅇㅇ (211.36)
+  let mi = -1;
+  for(let i = di+1; i < Math.min(lines.length, di+6); i++){ if(/조회/.test(lines[i])){ mi = i; break; } }
+  let start = (mi >= 0 ? mi : di) + 1;
+  for(let i = start; i < Math.min(lines.length, start + 14); i++){ if(AD_CTA.test(lines[i])){ start = i + 1; break; } }   // 광고 카드 건너뛰기
+  const body = []; let i = start;
+  for(; i < lines.length; i++){
+    const l = lines[i];
+    if((END_RE.test(l) && l.length < 30) || CMT_HEAD.test(l)) break;
+    if(/^[\d\s]+$/.test(l) && lines.slice(i+1, i+6).some(x => END_RE.test(x) || CMT_HEAD.test(x))) break;   // 추천·비추천 숫자
+    body.push(l);
+  }
+  const comments = [];
+  let ch = -1;
+  for(let k = i; k < lines.length; k++){ if(CMT_HEAD.test(lines[k])){ ch = k; break; } }
+  if(ch >= 0){
+    for(let k = ch + 1; k < lines.length; k++){
+      const l = lines[k];
+      if(CMT_END.test(l)) break;
+      if(/^(본문|등록순|\|| )+$/.test(l) || /^광고(\s|$)/.test(l) || /https?:\/\//.test(l)) continue;
+      comments.push(l);
+    }
+  }
+  return {title, author, time, body: body.join("\n"), comments: groupComments(comments)};
+}
+// "ㅇㅇ1 / 댓글 내용 / 시간" 으로 흩어진 줄을 댓글 1개당 한 줄로 묶음 (닉네임 줄이 없으면 그대로)
+function groupComments(ls){
+  const NICK = /^ㅇ\s*ㅇ\s*\d*\s*(\(\s*\d{1,3}\.\d{1,3}\s*\))?$/, TIME = /^20\d{2}\s*[.\-]\s*\d{1,2}\s*[.\-]\s*\d{1,2}\s*\d{1,2}:\d{2}$/;
+  if(!ls.some(l => NICK.test(l))) return ls;
+  const out = []; let cur = null;
+  for(const l of ls){
+    if(NICK.test(l)){ cur = {n: l.replace(/\s+/g, ""), t: [], time: ""}; out.push(cur); }
+    else if(cur && TIME.test(l)) cur.time = l;
+    else if(cur) cur.t.push(l);
+    else out.push({n: "", t: [l], time: ""});
+  }
+  return out.map(c => `${c.n ? c.n + ": " : ""}${c.t.join(" ")}${c.time ? " (" + c.time + ")" : ""}`);
+}
+const formatPost = p => `[제목]\n${p.title}\n\n[작성자] ${p.author || "(없음)"}\n[게시시간] ${p.time}\n\n[본문]\n${p.body || "(본문 없음 또는 사진만)"}\n\n[댓글]\n${p.comments.length ? p.comments.join("\n") : "(없음)"}`;
+
+/* ---------- 파일 1개 처리 ---------- */
+async function processOne(q, mode){
+  const file = q.file, isImg = file.type.startsWith("image/"), clean = $("skipImg").checked, useTxt = $("useText").checked;
+  let pdf = null, total = 1;
+  if(!isImg){
+    pdf = await pdfjsLib.getDocument({data: await file.arrayBuffer(), cMapUrl: CMAP, cMapPacked: true, standardFontDataUrl: FONTS}).promise;
+    total = (mode === "raw" || $("withCmt").checked) ? pdf.numPages : 1;
+  }
+  const pages = [], hits = []; let used = "", thumb = null, sig = null;
+  for(let cur = 1; cur <= total; cur++){
+    let lines = [];
+    if(isImg){
+      const canvas = await imageToCanvas(file);
+      if(useImgMatch()) hits.push(...matchImages(canvas, [{x: 0, y: 0, w: canvas.width, h: canvas.height}], cur));
+      normalizeDark(canvas);
+      const sg = clean ? cleanCanvas(canvas, []).sig : uiSig(canvas);
+      if(cur === 1){ thumb = makeThumb(canvas); sig = sg; }
+      lines = await ocrCanvas(canvas, cur, total); used = "OCR(이미지)";
+    } else {
+      const page = await pdf.getPage(cur);
+      let cv = null, rects = [], wipes = [];
+      if(cur === 1 || useImgMatch() || !useTxt){ cv = await renderPage(page); rects = await imageRects(page, cv.vp); }
+      if(cv && useImgMatch()) hits.push(...matchImages(cv.canvas, rects, cur));      // 등록 사진 대조는 지우기 전에
+      if(cv) normalizeDark(cv.canvas);
+      if(cv){
+        const r = clean ? cleanCanvas(cv.canvas, rects) : {sig: uiSig(cv.canvas), wipes: []};
+        wipes = r.wipes;
+        if(cur === 1){ thumb = makeThumb(cv.canvas); sig = r.sig; }
+      }
+      let tl = [];
+      if(useTxt) tl = await textLayerLines(page, cv && cv.vp, wipes);
+      const txt = tl.join(""), han = (txt.match(/[가-힣]/g) || []).length;
+      let textOk = useTxt && txt.length > 20 && (!$("lang").value.includes("kor") || han >= 10);
+      if(textOk && cur === 1 && mode !== "raw" && !parsePost(tl)) textOk = false;    // 제목·시간을 못 찾으면 OCR로 대체
+      if(textOk){ lines = tl; used = "PDF 내장 글자"; }
+      else {
+        if(!cv){ cv = await renderPage(page); rects = await imageRects(page, cv.vp); normalizeDark(cv.canvas); if(clean) cleanCanvas(cv.canvas, rects); }
+        lines = await ocrCanvas(cv.canvas, cur, total); used = "OCR";
+      }
+    }
+    pages.push(lines);
+    if(mode !== "raw" && lines.some(l => CMT_END.test(l))) break;
+  }
+  const raw = pages.map((p, i) => `--- ${i+1} 페이지 ---\n${p.join("\n")}\n\n`).join("");
+  let out = raw, parsed = mode === "raw" ? null : false;
+  if(mode !== "raw"){ const p = parsePost(pages.flat()); if(p){ out = formatPost(p); parsed = true; } }
+  return {out, raw, used, hits, thumb, sig, parsed};
+}
+$("run").onclick = async () => {
+  $("run").disabled = true; $("out").value = ""; $("raw").value = ""; $("prog").style.width = "0"; $("gallery").innerHTML = ""; RESULTS = [];
+  const mode = $("mode").value, N = queue.length;
+  await runAutoSync();                                   // 시작 전에 공용 사전·사진을 최신으로
+  try {
+    for(FI = 0; FI < N; FI++){
+      const q = queue[FI]; PB = FI / N * 100; PS = 1 / N;
+      $("status").textContent = `파일 ${FI+1}/${N} 처리 중: ${q.name} (처음엔 한국어 데이터 다운로드로 오래 걸릴 수 있어요)`;
+      let r;
+      try { r = await processOne(q, mode); }
+      catch(e){ r = {out: "(처리 실패: " + e.message + ")", raw: "", used: "실패"}; }
+      r.url = (r.raw.match(/https?:\/\/\S+/) || [""])[0];
+      RESULTS.push({...q, ...r});
+      $("out").value += `===== [${FI+1}] ${q.name} =====\n${r.out.trim()}\n\n`;
+      $("raw").value += `===== [${FI+1}] ${q.name} =====\n${r.raw}\n`;
+      $("prog").style.width = ((FI+1) / N * 100) + "%";
+    }
+    renderGallery();
+    const bad = RESULTS.filter(r => r.parsed === false).length;
+    $("status").textContent = `완료! (${N}개 파일${bad ? `, 구조를 못 찾아 원문을 표시한 파일 ${bad}개` : ""})`;
+    $("copy").disabled = $("dl").disabled = false; $("analyze").disabled = false;
+    analyze();
+  } catch(err){
+    console.error(err); $("status").textContent = "오류: " + err.message;
+  } finally {
+    if(worker){ await worker.terminate(); worker = null; }
+    $("run").disabled = false;
+  }
+};
+
+/* ================= 법률 검토용 분석 ================= */
+const DEF_INSULT = `외모 비하: 곰보, 못생, 추녀, 추남, 돼지, 징그러
+인격 비하: 병신, 븅신, 쓰레기, 벌레, 찐따, 정신병자, 또라이
+성적 비하: 걸레, 창녀, 자지, 빨아
+출신·민족 비하: 짱깨, 쪽바리`;
+const DEF_DEFAM = `범죄·수사: 잡혀, 체포, 구속, 수감, 전과, 사기, 횡령, 보이스피싱, 폭행, 고소, 기소, 징역, 탈세, 마약, 불법
+금전·채무: 빚, 채무, 파산, 먹튀, 떼먹
+사생활·가족: 불륜, 바람피, 이혼, 전남편, 전처, 남편, 혼외, 낙태, 동거
+경력·비위: 학력, 가짜, 조작, 표절, 비리, 갑질, 뇌물, 학폭
+질병·건강: 정신병원, 성병, 에이즈, 우울증
+전언·소문: 소문, 카더라, 라던데, 라더라, 들었는데, 했대, 알려졌`;
+$("dInsult").value = DEF_INSULT; $("dDefam").value = DEF_DEFAM;
+try { const sd = JSON.parse(localStorage.getItem("dictCfg") || "null"); if(sd){ $("dInsult").value = sd.insult; $("dDefam").value = sd.defam; } } catch(e) {}
+// 이전 버전에서 이 기기에만 등록해 둔 단어가 있으면, 서버에 아직 안 올라간 것으로 보고 첫 동기화 때 올림
+try { if(localStorage.getItem("dictInit") !== "1"){ localStorage.setItem("dictInit", "1"); if($("dInsult").value !== DEF_INSULT || $("dDefam").value !== DEF_DEFAM) localStorage.setItem("dictPending", "1"); } } catch(e) {}
+
+const nospace = t => t.replace(/[\s.\-_·,~!?*'"“”‘’`]+/g, "");
+const esc = t => t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+const escRe = t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const fileLabel = fi => { const r = RESULTS[fi]; return r ? (r.rel ? r.rel + "/" : "") + r.name : ""; };
+function parseDict(text){
+  return text.split("\n").map(l => {
+    const i = l.indexOf(":"); if(i < 0) return null;
+    const words = l.slice(i+1).split(/[,，]/).map(nospace).filter(Boolean);
+    return words.length ? {label: l.slice(0,i).trim(), words} : null;
+  }).filter(Boolean);
+}
+function lev(a, b){
+  const m = a.length, n = b.length; let prev = Array.from({length: n + 1}, (_, j) => j);
+  for(let i = 1; i <= m; i++){
+    const cur = [i];
+    for(let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+// 1 = 정확히 포함, 2 = OCR 오타 정도의 유사 포함(6자 이상 문장만), 0 = 없음
+function fuzzyHas(t, w){
+  if(t.includes(w)) return 1;
+  const L = w.length; if(L < 6) return 0;
+  const tol = Math.floor(L * 0.15); if(!tol) return 0;
+  for(let len = L - tol; len <= L + tol; len++) for(let i = 0; i + len <= t.length; i++) if(lev(t.slice(i, i + len), w) <= tol) return 2;
+  return 0;
+}
+function findHits(line, groups){
+  const t = nospace(line), hits = [];
+  for(const g of groups) for(const w of g.words){
+    const fs = w.split("+").filter(Boolean).map(x => fuzzyHas(t, x));      // "A+B" = 같은 줄에 A와 B가 모두 있을 때
+    if(fs.length && fs.every(Boolean)) hits.push({label: g.label, word: w, fuzzy: fs.includes(2)});
+  }
+  return hits;
+}
+function highlight(line, words){
+  const h = esc(line); if(!words.length) return h;
+  const re = new RegExp([...new Set(words)].map(w => w.split("").map(escRe).join("\\s*")).join("|"), "g");
+  return h.replace(re, m => `<mark>${m}</mark>`);
+}
+function analyze(){
+  const ins = parseDict($("dInsult").value), df = parseDict($("dDefam").value);
+  const targets = $("targets").value.split(/[,，\n]/).map(nospace).filter(Boolean);
+  const cats = ["", "복합 (모욕+명예훼손 단서)", "명예훼손 단서", "모욕 단서"];
+  let page = 1, fi = 0, scanned = 0, sec = ""; rows = []; const mark = {};
+  $("out").value.split("\n").forEach((raw, i) => {
+    let m = raw.match(/^=====\s*\[(\d+)\]/);
+    if(m){ fi = +m[1] - 1; page = 1; sec = ""; mark[fi] = i; return; }
+    m = raw.match(/^---\s*(\d+)\s*페이지\s*---$/);
+    if(m){ page = +m[1]; return; }
+    const line = raw.trim();
+    const sm = line.match(/^\[(제목|본문|댓글|게시시간)\]/);
+    if(sm){ sec = sm[1]; return; }
+    if(!line || /^\[(작성자|조회수)\]/.test(line) || /https?:\/\//.test(line)) return;
+    scanned++;
+    const hi = findHits(line, ins), hd = findHits(line, df);
+    if(/[가-힣A-Za-z0-9]{2,}\s*=\s*[가-힣A-Za-z0-9]{2,}/.test(line)) hd.push({label: "지목·동일시 표현", word: "="});
+    if(!hi.length && !hd.length) return;
+    const pri = hi.length && hd.length ? 1 : hd.length ? 2 : 3;
+    const spec = !targets.length ? "대상 미입력" : targets.some(t => nospace(line).includes(t)) ? "대상 언급" : "확인 필요";
+    rows.push({i, fi, page, pri, cat: cats[pri], line, hi, hd, spec, loc: `${sec || "p." + page} ${i+1}줄`});
+  });
+  RESULTS.forEach((r, k) => (r.hits || []).forEach(h => rows.push({
+    i: (mark[k] ?? -1) + 0.5, fi: k, page: h.page, pri: 3, cat: "모욕 단서 (등록 사진 일치)", img: true,
+    line: `[등록 사진 일치] ${h.ref} (유사도 ${Math.round(h.sim * 100)}%)`,
+    hi: [{label: "등록 사진", word: h.ref}], hd: [], spec: "등록 사진 일치", loc: `p.${h.page} 사진 ${h.n}`
+  })));
+  rows.scanned = scanned;
+  render();
+  $("rep").disabled = $("csv").disabled = $("gsSend").disabled = false;
+}
+const sortedRows = () => [...rows].sort($("sort").value === "pri" ? (a,b) => a.pri - b.pri || a.fi - b.fi || a.i - b.i : (a,b) => a.i - b.i);
+const basis = r => [...r.hi, ...r.hd].map(h => `${h.label}:${h.word}${h.fuzzy ? "(유사)" : ""}`).join(" / ");
+function render(){
+  const c = n => rows.filter(r => r.pri === n).length;
+  $("summary").textContent = `단서 ${rows.length}건 (복합 ${c(1)} · 명예훼손 ${c(2)} · 모욕 ${c(3)}) / 파일 ${RESULTS.length}개 / 분석한 줄 ${rows.scanned}`;
+  if(!rows.length){ $("tblwrap").innerHTML = ""; return; }
+  let h = "<table><tr><th>#</th><th>구분</th><th>문장</th><th>근거</th><th>특정성</th><th>파일</th><th>위치</th></tr>";
+  sortedRows().forEach((r, k) => {
+    const words = [...r.hi, ...r.hd].filter(x => !x.fuzzy).flatMap(x => x.word.split("+")).filter(w => w !== "=");
+    h += `<tr><td>${k+1}</td><td class="t${r.pri}">${r.cat}</td><td>${highlight(r.line, words)}</td><td>${esc(basis(r))}</td><td>${r.spec}</td><td>${esc(fileLabel(r.fi))}</td><td>${r.loc}</td></tr>`;
+  });
+  $("tblwrap").innerHTML = h + "</table>";
+}
+function download(name, text, type){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {type})); a.download = name; a.click();
+}
+$("analyze").onclick = analyze;
+$("sort").onchange = render;
+$("out").addEventListener("input", () => { $("analyze").disabled = false; });
+
+$("rep").onclick = () => {
+  let t = "[상담용 정리 자료 - 자동 분석 (참고용, 법적 판단 아님)]\n";
+  t += `작성일시: ${new Date().toLocaleString("ko-KR")}\n파일 수: ${RESULTS.length}\n대상 입력: ${$("targets").value}\n\n[단서 요약] ${$("summary").textContent}\n\n`;
+  sortedRows().forEach((r, k) => { t += `(${k+1}) ${r.cat} | ${fileLabel(r.fi)} ${r.loc} | 특정성: ${r.spec}\n    문장: ${r.line}\n    근거: ${basis(r)}\n\n`; });
+  t += "------------------------------\n[파일별 출처 URL(인식값)]\n" + RESULTS.map((r, k) => `[${k+1}] ${fileLabel(k)} : ${r.url}`).join("\n");
+  t += "\n\n[원문 (OCR 결과)]\n" + $("out").value + "\n\n[유의사항] 사전의 단어·문형으로 단서를 표시한 것으로, 사실 여부·공연성·특정성·비방 목적·위법성 조각(형법 제310조) 등은 변호사 확인이 필요합니다. OCR 오인식 가능성이 있으므로 원본과 대조하세요.\n";
+  download("상담용_리포트.txt", t, "text/plain;charset=utf-8");
+};
+$("csv").onclick = () => {
+  const q = v => `"${String(v).replace(/"/g, '""')}"`;
+  let t = "\uFEFF순번,구분,문장,근거,특정성,파일,페이지,줄\n";
+  sortedRows().forEach((r, k) => { t += [k+1, r.cat, r.line, basis(r), r.spec, fileLabel(r.fi), r.page, r.img ? "이미지" : r.i+1].map(q).join(",") + "\n"; });
+  download("분석표.csv", t, "text/csv;charset=utf-8");
+};
+$("copy").onclick = async () => { await navigator.clipboard.writeText($("out").value); $("status").textContent = "복사했습니다."; };
+$("dl").onclick = () => download((queue.length === 1 ? queue[0].name.replace(/\.[^.]+$/, "") : "ocr_결과") + ".txt", $("out").value, "text/plain;charset=utf-8");
+
+/* ================= 구글 스프레드시트 전송 ================= */
+const GS_URL_OK = !GS_URL.includes("여기에");
+if(GS_URL_OK){ $("gsUrl").value = GS_URL; $("gsUrl").style.display = "none"; }
+try {
+  const sv = JSON.parse(localStorage.getItem("gsCfg") || "null");
+  if(sv){ if(!GS_URL_OK) $("gsUrl").value = sv.url || ""; $("gsToken").value = sv.token || ""; $("gsWho").value = sv.who || ""; }
+} catch(e) {}
+function saveGs(){ try { localStorage.setItem("gsCfg", JSON.stringify({url: $("gsUrl").value.trim(), token: $("gsToken").value, who: $("gsWho").value.trim()})); } catch(e) {} }
+["gsUrl", "gsToken", "gsWho"].forEach(id => $(id).addEventListener("input", saveGs));
+$("gsSend").onclick = async () => {
+  const url = $("gsUrl").value.trim(), token = $("gsToken").value;
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(url) || !token){ $("status").textContent = "웹앱 주소와 비밀번호를 확인하세요."; return; }
+  if(!confirm("분석 결과와 OCR 원문이 내 구글 스프레드시트(구글 서버)로 전송됩니다. 계속할까요?")) return;
+  const payload = {
+    token, who: $("gsWho").value.trim(), action: "save", sentAt: new Date().toLocaleString("ko-KR"),
+    targets: $("targets").value, summary: $("summary").textContent,
+    docs: RESULTS.map((r, k) => ({name: r.name, folder: r.rel, id: r.id, url: r.url, used: r.used, text: r.out, hits: rows.filter(x => x.fi === k).length})),
+    rows: sortedRows().map((r, k) => [r.fi, k+1, r.cat, r.line, basis(r), r.spec, r.page, r.img ? "이미지" : r.i+1])
+  };
+  $("gsSend").disabled = true;
+  try {
+    await fetch(url, {method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain;charset=utf-8"}, body: JSON.stringify(payload)});
+    $("status").textContent = "전송 요청을 보냈습니다. 스프레드시트의 '분석표'·'원문' 시트를 확인하세요.";
+  } catch(err){ $("status").textContent = "전송 실패: " + err.message; }
+  $("gsSend").disabled = false;
+};
+/* ================= 속어 등록 · 공용 사전 · 기준 사진 ================= */
+function fitBoxes(){ ["dInsult", "dDefam"].forEach(id => { const el = $(id); if(!el.offsetParent) return; el.style.height = "auto"; el.style.height = (el.scrollHeight + 4) + "px"; }); }
+function saveDict(){ try { localStorage.setItem("dictCfg", JSON.stringify({insult: $("dInsult").value, defam: $("dDefam").value})); } catch(e) {} fitBoxes(); }
+const pend = () => { try { return localStorage.getItem("dictPending") === "1"; } catch(e) { return false; } };
+const setPend = v => { try { v ? localStorage.setItem("dictPending", "1") : localStorage.removeItem("dictPending"); } catch(e) {} };
+function mergeText(a, b){
+  const map = new Map();
+  [a, b].forEach(t => String(t || "").split("\n").forEach(l => {
+    const i = l.indexOf(":"); if(i < 0) return;
+    const label = l.slice(0, i).trim(), ws = l.slice(i + 1).split(/[,，]/).map(w => w.trim()).filter(Boolean);
+    if(!map.has(label)) map.set(label, []);
+    const arr = map.get(label); ws.forEach(w => { if(!arr.includes(w)) arr.push(w); });
+  }));
+  return [...map].map(([k, v]) => `${k}: ${v.join(", ")}`).join("\n");
+}
+function addWords(kind, group, words, asPhrase){
+  const ta = $(kind === "insult" ? "dInsult" : "dDefam"), label = group || "사용자 등록";
+  const list = (asPhrase ? words.split("\n").map(w => w.replace(/[,，|]/g, " ").replace(/\s+/g, " ").trim()) : words.split(/[,，\n]/).map(w => w.trim())).filter(Boolean);
+  if(!list.length) return 0;
+  ta.value = mergeText(ta.value, `${label}: ${list.join(", ")}`); saveDict();
+  return list.length;
+}
+// 서버 사전이 기준: 서버에 내용이 있으면 그대로 가져옴 (시트의 "사전" 탭에서 지운 단어도 반영됨)
+async function pullDict(){
+  const d = await gsCall({action: "dictLoad"});
+  if(d.insult || d.defam){ $("dInsult").value = d.insult; $("dDefam").value = d.defam; saveDict(); }
+  else if($("dInsult").value !== DEF_INSULT || $("dDefam").value !== DEF_DEFAM) await pushDict();   // 새 서버가 비어 있으면 이 기기의 사전으로 채움 (계정을 바꾼 직후)
+}
+async function pushDict(){
+  const d = await gsCall({action: "dictSave", insult: $("dInsult").value, defam: $("dDefam").value});
+  $("dInsult").value = d.insult; $("dDefam").value = d.defam; saveDict();
+}
+$("addWords").onclick = async () => {
+  const text = $("newWords").value;
+  if(!text.trim()){ $("dictMsg").textContent = "등록할 단어를 입력하세요."; return; }
+  try { if(pend()) await pushDict(); else await pullDict(); } catch(e) {}   // 다른 사람이 방금 등록한 것까지 먼저 받아온 뒤
+  const n = addWords($("newKind").value, $("newGroup").value.trim(), text, $("newMode").value === "phrase");
+  $("newWords").value = "";
+  try { await pushDict(); setPend(false); $("dictMsg").textContent = `${n}개를 서버 공용 사전에 추가했습니다. 다른 사람에게도 자동으로 적용됩니다.`; setState(true, "서버와 동기화됨 (" + new Date().toLocaleTimeString("ko-KR") + ")"); }
+  catch(e){ setPend(true); $("dictMsg").textContent = `이 기기에는 등록했지만 서버에는 아직 못 올렸습니다: ${e.message} — 비밀번호를 입력하거나 연결되면 자동으로 서버에 올라갑니다.`; setState(false, "서버에 못 올린 등록이 있음 — " + e.message); }
+  if(RESULTS.length) analyze();
+};
+
+/* ----- 기준 사진: 드라이브 '모욕_기준사진' 폴더와 자동 동기화 (사이트에서는 추가·삭제 없음) ----- */
+function saveRefs(){ try { localStorage.setItem("refCfg", JSON.stringify(refs)); } catch(e) {} }
+function renderRefs(){
+  $("refInfo").textContent = refs.length
+    ? `등록 사진 ${refs.length}개 (드라이브 '모욕_기준사진' 폴더와 자동 동기화): ` + refs.map(r => r.name).join(", ")
+    : "등록 사진 없음 — 드라이브 '모욕_기준사진' 폴더에 사진을 넣으면 자동으로 대조합니다.";
+}
+async function addRef(blob, name, id){
+  const bm = await createImageBitmap(blob), h = dhash(bm, 0, 0, bm.width, bm.height);
+  if(h === FLAT) return false;
+  refs = refs.filter(r => r.id !== id); refs.push({name, src: "drive", h, id});
+  return true;
+}
+async function syncRefs(){
+  const {files} = await gsCall({action: "refList"});
+  const ids = new Set(files.map(f => f.id));
+  refs = refs.filter(r => ids.has(r.id));                      // 폴더에서 지운 사진은 제거
+  const have = new Set(refs.map(r => r.id));
+  const todo = files.filter(f => !have.has(f.id));             // 새 사진만 내려받음
+  for(let i = 0; i < todo.length; i++){
+    $("refInfo").textContent = `등록 사진 불러오는 중... ${i+1}/${todo.length}`;
+    const j = await gsCall({action: "refFile", id: todo[i].id});
+    const bin = atob(j.b64), u8 = new Uint8Array(bin.length);
+    for(let k = 0; k < bin.length; k++) u8[k] = bin.charCodeAt(k);
+    await addRef(new Blob([u8], {type: j.mime}), j.name, todo[i].id);
+  }
+  saveRefs(); renderRefs();
+}
+try { refs = JSON.parse(localStorage.getItem("refCfg") || "[]").filter(r => r.src === "drive" && r.id); } catch(e) { refs = []; }
+renderRefs();
+
+/* ----- 자동 동기화: 접속할 때 / 비밀번호 입력 시 / 시작 누를 때 / 탭으로 돌아올 때 ----- */
+let lastSync = 0;
+function setState(ok, txt){ const e = $("dictState"); e.textContent = (ok ? "✅ " : "⚠️ ") + txt; e.style.color = ok ? "#7ddf7d" : "#ffb347"; }
+if(/KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|; wv\)|Line\//i.test(navigator.userAgent)) $("inappWarn").style.display = "block";
+async function runAutoSync(){
+  if(!$("gsUrl").value.trim() || !$("gsToken").value){ setState(false, "서버와 동기화 안 됨 — 공용 비밀번호를 입력하세요 (지금 보이는 사전은 이 기기에 저장된 값" + (pend() ? ", 이 기기에서 등록한 단어는 동기화되면 자동으로 서버에 올라갑니다" : "") + ")"); return; }
+  try {
+    if(pend()){ await pushDict(); setPend(false); } else await pullDict();
+    setState(true, "서버와 동기화됨 (" + new Date().toLocaleTimeString("ko-KR") + ")"); $("dictMsg").textContent = "공용 사전과 동기화했습니다.";
+    if(RESULTS.length) analyze();
+  }
+  catch(e){ setState(false, "동기화 실패: " + e.message); $("dictMsg").textContent = "사전 동기화 실패: " + e.message; return; }
+  try { await syncRefs(); }
+  catch(e){ $("refInfo").textContent = /폴더가 없습니다/.test(e.message) ? "드라이브에 '모욕_기준사진' 폴더가 없어 사진 대조는 건너뜁니다." : "등록 사진 동기화 실패: " + e.message; }
+  lastSync = Date.now();
+}
+$("gsToken").addEventListener("change", () => { saveGs(); runAutoSync(); });
+$("gsLogout").onclick = () => { $("gsToken").value = ""; saveGs(); $("dictMsg").textContent = "저장된 비밀번호를 지웠습니다."; };
+document.addEventListener("visibilitychange", () => { if(!document.hidden && Date.now() - lastSync > 60000) runAutoSync(); });
+$("syncNow").onclick = () => { $("dictMsg").textContent = "동기화 중..."; runAutoSync(); };
+document.querySelectorAll("details").forEach(d => d.addEventListener("toggle", fitBoxes));
+window.addEventListener("resize", fitBoxes);
+fitBoxes();
+runAutoSync();
+</script>
+</body>
+</html>
